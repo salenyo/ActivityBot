@@ -1,0 +1,16 @@
+[project]
+name = "hydra-activity-bot"
+version = "0.1.0"
+description = "Voice activity tracking bot for Hydra ecosystem"
+requires-python = ">=3.12"
+dependencies = [
+    "disnake>=2.10",
+    "pydantic>=2.6",
+    "hydra-shared",
+]
+
+[tool.uv.sources]
+hydra-shared = { path = "../../shared", editable = true }
+
+[tool.uv]
+package = false
