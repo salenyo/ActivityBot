@@ -2,40 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from disnake import ButtonStyle, Colour
-from disnake.ui import ActionRow, Button, Container, Separator, TextDisplay
+from disnake import Colour
+from disnake.ui import Container, Separator, TextDisplay
+
+from .utils import CONTEST_TYPE_LABEL, format_duration, medal, time_left
 
 REJECT_COLOUR = 0xED4245
 UTC = timezone.utc
-
-_TYPE_LABEL = {"day": "День", "week": "Неделя", "month": "Месяц"}
-_MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
-
-
-def _medal(rank: int) -> str:
-    return _MEDALS.get(rank, f"**{rank}.**")
-
-
-def _fmt(seconds: int) -> str:
-    h, r = divmod(seconds, 3600)
-    m = r // 60
-    if h:
-        return f"{h}ч {m}мин"
-    return f"{m}мин"
-
-
-def _time_left(ends_at: datetime) -> str:
-    delta = ends_at - datetime.now(UTC)
-    if delta.total_seconds() <= 0:
-        return "завершён"
-    total = int(delta.total_seconds())
-    h, r = divmod(total, 3600)
-    m = r // 60
-    if h >= 24:
-        return f"{h // 24}д {h % 24}ч"
-    if h:
-        return f"{h}ч {m}мин"
-    return f"{m}мин"
 
 
 def build_stats_container(
@@ -49,22 +22,26 @@ def build_stats_container(
         ends_at = datetime.fromisoformat(contest["ends_at"])
         if ends_at.tzinfo is None:
             ends_at = ends_at.replace(tzinfo=UTC)
-        type_label = _TYPE_LABEL.get(contest["contest_type"], contest["contest_type"])
+        type_label = CONTEST_TYPE_LABEL.get(contest["contest_type"], contest["contest_type"])
         header = f"## 🏆 Конкурс активности · {type_label}"
-        sub = f"Осталось: **{_time_left(ends_at)}**"
+        sub = f"Осталось: **{time_left(ends_at)}**"
     else:
         header = "## 📊 Активность за 7 дней"
-        sub = "Нет активного конкурса"
+        sub = "Нет активного конкурса · статистика за последние 7 дней"
 
-    lines = [f"{_medal(e['rank'])} <@{e['user_id']}> — **{_fmt(e['total_seconds'])}**" for e in entries]
-    board_text = "\n".join(lines) if lines else "*Нет данных*"
+    lines = [
+        f"{medal(e['rank'])} <@{e['user_id']}> — **{format_duration(e['total_seconds'])}**"
+        for e in entries
+    ]
+    board_text = "\n".join(lines) if lines else "*Нет данных за этот период*"
 
     user_rank = next((e["rank"] for e in entries if e["user_id"] == user_id), None)
-    user_line = (
-        f"Ваша позиция: {_medal(user_rank)} — **{_fmt(user_total)}**"
-        if user_rank
-        else f"Ваш результат: **{_fmt(user_total)}**" if user_total else "Вы ещё не участвовали в этом периоде."
-    )
+    if user_rank:
+        user_line = f"Ваша позиция: {medal(user_rank)} — **{format_duration(user_total)}**"
+    elif user_total:
+        user_line = f"Ваш результат: **{format_duration(user_total)}** (за пределами топ-10)"
+    else:
+        user_line = "Вы ещё не участвовали в этом периоде."
 
     return Container(
         TextDisplay(header),
@@ -79,7 +56,7 @@ def build_stats_container(
 
 
 def build_contest_started_container(contest: dict, accent: int) -> Container:
-    type_label = _TYPE_LABEL.get(contest["contest_type"], contest["contest_type"])
+    type_label = CONTEST_TYPE_LABEL.get(contest["contest_type"], contest["contest_type"])
     ends_at = datetime.fromisoformat(contest["ends_at"])
     if ends_at.tzinfo is None:
         ends_at = ends_at.replace(tzinfo=UTC)
@@ -98,17 +75,15 @@ def build_contest_started_container(contest: dict, accent: int) -> Container:
 def build_contest_ended_container(
     contest: dict,
     entries: list[dict],
-    guild,
     accent: int,
 ) -> Container:
-    type_label = _TYPE_LABEL.get(contest["contest_type"], contest["contest_type"])
+    type_label = CONTEST_TYPE_LABEL.get(contest["contest_type"], contest["contest_type"])
     lines = [
-        f"{_medal(e['rank'])} <@{e['user_id']}> — **{_fmt(e['total_seconds'])}**"
+        f"{medal(e['rank'])} <@{e['user_id']}> — **{format_duration(e['total_seconds'])}**"
         for e in entries
     ]
     board_text = "\n".join(lines) if lines else "*Нет участников*"
     winner_text = f"Победитель: <@{entries[0]['user_id']}> 🎉" if entries else "Победителя нет."
-
     return Container(
         TextDisplay(f"## 🏁 Конкурс завершён · {type_label}"),
         Separator(),
