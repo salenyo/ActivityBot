@@ -114,10 +114,11 @@ class ActivityCommands(Cog):
 
     # ── Auto-completion watcher ───────────────────────────────────────────────
 
-    @tasks.loop(minutes=30)
+    @tasks.loop(minutes=5)
     async def _contest_watcher(self):
         guild_id = self.bot.primary_guild_id
         if guild_id is None:
+            log.warning("contest_watcher_no_guild")
             return
         try:
             contest = await self.bot.db.activity.get_active_contest(guild_id)
@@ -126,8 +127,21 @@ class ActivityCommands(Cog):
             _, ends_at = parse_contest_dates(contest)
             if datetime.now(UTC) < ends_at:
                 return
-            await self._announce_winner(contest)
+
+            # Объявление в отдельном try: даже если отправка упадёт (нет прав,
+            # канал не найден и т.п.), конкурс всё равно должен завершиться —
+            # иначе он навсегда останется активным и будет висеть в /activity stats.
+            try:
+                await self._announce_winner(contest)
+            except Exception as e:
+                log.error(
+                    "contest_announce_failed",
+                    contest_id=contest["id"],
+                    error=str(e),
+                )
+
             await self.bot.db.activity.end_contest(contest["id"])
+            log.info("contest_ended", contest_id=contest["id"])
         except Exception as e:
             log.error("contest_watcher_failed", error=str(e))
 
@@ -138,12 +152,18 @@ class ActivityCommands(Cog):
     async def _announce_winner(self, contest: dict) -> None:
         cfg = await self.bot.get_cfg()
         if cfg.activity_results_channel_id is None:
+            log.warning("contest_results_channel_unset", contest_id=contest["id"])
             return
         guild = self.bot.get_guild(self.bot.primary_guild_id)
         if guild is None:
+            log.warning("contest_guild_unavailable", guild_id=self.bot.primary_guild_id)
             return
         channel = guild.get_channel(cfg.activity_results_channel_id)
         if channel is None:
+            log.warning(
+                "contest_results_channel_not_found",
+                channel_id=cfg.activity_results_channel_id,
+            )
             return
 
         from_dt, ends_at = parse_contest_dates(contest)
