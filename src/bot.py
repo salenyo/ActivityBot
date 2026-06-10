@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hydra_shared.bot_base import HydraBot
+from hydra_shared.bot_base import HydraBot, run_bot
 from hydra_shared.config import ServiceSettings
 from hydra_shared.core_client import fetch_primary_guild_id
 from hydra_shared.events.topics import CORE_CONFIG_CHANGED
@@ -14,11 +14,12 @@ SERVICE_NAME = "activity-bot"
 COGS = [
     "src.cogs.voice_tracker",
     "src.cogs.activity",
+    "src.cogs.debug",
 ]
 
 
 class ActivityBot(HydraBot):
-    def __init__(self, settings: ServiceSettings, primary_guild_id: int | None = None):
+    def __init__(self, settings: ServiceSettings, *, primary_guild_id: int | None = None):
         super().__init__(settings, primary_guild_id=primary_guild_id)
         self._guild_cfg: ActivityConfig | None = None
         self._rewarm_task: asyncio.Task | None = None
