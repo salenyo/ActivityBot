@@ -85,13 +85,13 @@ class ActivityCommands(Cog):
         if not isinstance(inter.author, Member):
             return await inter.response.send_message("Только на сервере.", ephemeral=True)
 
+        await inter.response.defer(ephemeral=True)
         cfg = await self.bot.get_cfg()
         if not has_contest_permission(cfg, inter.author):
-            return await inter.response.send_message(
-                "У вас недостаточно прав для запуска конкурса.", ephemeral=True
+            return await inter.edit_original_message(
+                components=[build_error_container("У вас недостаточно прав для запуска конкурса.")]
             )
 
-        await inter.response.defer(ephemeral=True)
         now = datetime.now(UTC)
         ends_at = now + CONTEST_DURATIONS[type]
 
