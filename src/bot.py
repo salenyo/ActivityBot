@@ -11,7 +11,6 @@ from src.data import ActivityConfig
 
 SERVICE_NAME = "activity-bot"
 COGS = [
-    "src.cogs.error_logger",
     "src.cogs.voice_tracker",
     "src.cogs.activity",
 ]
