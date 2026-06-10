@@ -75,8 +75,9 @@ ActivityBot (микросервис)
 | `DB_API_KEY` | Ключ авторизации к DB-API |
 | `CORE_URL` | URL core-service (default `http://core:8001`) |
 | `REDIS_URL` | Redis (default `redis://redis:6379/0`) |
-| `PRIMARY_GUILD_ID` | ID Discord сервера |
 | `ENABLED` | `true`/`false` — выключить без удаления кода |
+
+> `guild_id` бот узнаёт из core (`guild.yaml`) при старте — env-переменной нет.
 
 ---
 

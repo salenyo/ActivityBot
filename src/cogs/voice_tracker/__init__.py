@@ -80,7 +80,7 @@ class VoiceTracker(Cog):
         if cfg.activity_tracked_category_id is None:
             return
 
-        guild = self.bot.get_guild(self.bot.settings.primary_guild_id)
+        guild = self.bot.get_guild(self.bot.primary_guild_id)
         if guild is None:
             return
 

@@ -116,7 +116,7 @@ class ActivityCommands(Cog):
 
     @tasks.loop(minutes=30)
     async def _contest_watcher(self):
-        guild_id = self.bot.settings.primary_guild_id
+        guild_id = self.bot.primary_guild_id
         if guild_id is None:
             return
         try:
@@ -139,7 +139,7 @@ class ActivityCommands(Cog):
         cfg = await self.bot.get_cfg()
         if cfg.activity_results_channel_id is None:
             return
-        guild = self.bot.get_guild(self.bot.settings.primary_guild_id)
+        guild = self.bot.get_guild(self.bot.primary_guild_id)
         if guild is None:
             return
         channel = guild.get_channel(cfg.activity_results_channel_id)
