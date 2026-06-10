@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 from disnake import Member
 
+from hydra_shared.decorators.permissions import has_role_access
+
 UTC = timezone.utc
 
 CONTEST_DURATIONS: dict[str, timedelta] = {
@@ -66,5 +68,5 @@ def parse_contest_dates(contest: dict) -> tuple[datetime, datetime]:
 
 
 def has_contest_permission(cfg, member: Member) -> bool:
-    roles = set(cfg.activity_contest_role_ids or [])
-    return any(r.id in roles for r in member.roles) or member.id in (cfg.owner_ids or [])
+    # Общая ролевая проверка из ядра: админ/владелец ИЛИ роль из конфига.
+    return has_role_access(cfg, member, "activity_contest_role_ids")
