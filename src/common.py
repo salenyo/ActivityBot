@@ -20,6 +20,11 @@ CONTEST_TYPE_LABEL: dict[str, str] = {
     "month": "Месяц",
 }
 
+CONTEST_KIND_LABEL: dict[str, str] = {
+    "leaderboard": "Топ по активности",
+    "giveaway": "Розыгрыш",
+}
+
 _MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
 
 

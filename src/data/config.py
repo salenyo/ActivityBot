@@ -8,3 +8,4 @@ class ActivityConfig(GuildConfig):
     activity_excluded_channel_ids: list[int] = []
     activity_contest_role_ids: list[int] = []
     activity_results_channel_id: int | None = None
+    activity_contest_banner_path: str | None = None

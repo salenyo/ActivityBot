@@ -1,29 +1,50 @@
 from __future__ import annotations
 
+import os
+import random
 from datetime import datetime, timezone
 
-from disnake import ApplicationCommandInteraction, Member, MessageInteraction
+from disnake import (
+    ApplicationCommandInteraction,
+    File,
+    Member,
+    MessageInteraction,
+    ModalInteraction,
+)
 from disnake.ext import tasks
-from disnake.ext.commands import AutoShardedBot, Cog, Param, slash_command
+from disnake.ext.commands import AutoShardedBot, Cog, slash_command
+from disnake.ui import Modal, TextInput
 
 from hydra_shared.logging import get_logger
 from hydra_shared.ui import send_notify
 
 from src.common import (
     CONTEST_DURATIONS,
+    CONTEST_KIND_LABEL,
+    format_duration,
     has_contest_permission,
+    medal,
     parse_contest_dates,
 )
 
 from .containers import (
+    DUR_PREFIX,
+    END_PREFIX,
     JOIN_PREFIX,
+    KIND_PREFIX,
+    MAIN_BUTTON,
+    NEW_BUTTON,
     build_contest_announcement,
     build_contest_ended,
-    build_contest_stats,
+    build_contest_main,
+    build_contest_overview,
+    build_duration_picker,
+    build_kind_picker,
 )
 
 log = get_logger(__name__)
 UTC = timezone.utc
+BANNER_FILENAME = "contest.png"
 
 
 class ContestCommands(Cog):
@@ -34,103 +55,105 @@ class ContestCommands(Cog):
     def cog_unload(self):
         self._contest_watcher.cancel()
 
-    # ── Commands ─────────────────────────────────────────────────────────────
+    # ── /contest ──────────────────────────────────────────────────────────────
 
     @slash_command(name="contest", description="Конкурсы активности")
     async def contest(self, inter: ApplicationCommandInteraction):
-        pass
-
-    @contest.sub_command(name="start", description="Запустить конкурс активности с призом")
-    async def contest_start(
-        self,
-        inter: ApplicationCommandInteraction,
-        type: str = Param(description="Длительность конкурса", choices=["day", "week", "month"]),
-        prize: str = Param(description="Приз конкурса"),
-        winners: int = Param(default=1, description="Сколько победителей", ge=1, le=20),
-    ):
         if not isinstance(inter.author, Member):
             return await inter.response.send_message("Только на сервере.", ephemeral=True)
 
         await inter.response.defer(ephemeral=True)
         cfg = await self.bot.get_cfg()
-        if not has_contest_permission(cfg, inter.author):
-            return await send_notify(
-                inter, "У вас недостаточно прав для запуска конкурса.", is_error=True
+        contests = await self.bot.db.activity.get_active_contests(inter.guild_id)
+
+        if has_contest_permission(cfg, inter.author):
+            stats = await self._build_stats(contests)
+            await inter.edit_original_message(
+                components=[build_contest_main(stats, cfg.embed_color)]
+            )
+        else:
+            stats = await self._build_stats(contests, viewer_id=inter.author.id)
+            await inter.edit_original_message(
+                components=[build_contest_overview(stats, cfg.embed_color)]
             )
 
-        now = datetime.now(UTC)
-        ends_at = now + CONTEST_DURATIONS[type]
+    async def _build_stats(self, contests: list[dict], viewer_id: int | None = None) -> list[dict]:
+        """Собирает по каждому активному конкурсу данные для контейнера обзора/управления."""
+        stats: list[dict] = []
+        for contest in contests:
+            participants = await self.bot.db.activity.get_participants(contest["id"])
+            stat = {
+                "contest": contest,
+                "participant_count": len(participants),
+                "qualified_count": None,
+                "personal": None,
+            }
+            if contest.get("kind") == "giveaway":
+                qualified = await self.bot.db.activity.get_qualified_participants(contest["id"])
+                stat["qualified_count"] = len(qualified)
+                if viewer_id is not None:
+                    if viewer_id in qualified:
+                        stat["personal"] = "✅ Вы выполнили условие."
+                    elif viewer_id in participants:
+                        stat["personal"] = "⏳ Вы участвуете — наберите нужную активность в голосовых."
+                    else:
+                        stat["personal"] = "-# Нажмите «Участие» под анонсом, чтобы попасть в розыгрыш."
+            elif viewer_id is not None:
+                entries = await self.bot.db.activity.get_contest_leaderboard(contest["id"], limit=100)
+                rank = next((e["rank"] for e in entries if e["user_id"] == viewer_id), None)
+                if rank:
+                    stat["personal"] = f"Ваша позиция: {medal(rank)}"
+                elif viewer_id in participants:
+                    stat["personal"] = "⏳ Вы участвуете — набирайте активность в голосовых."
+                else:
+                    stat["personal"] = "-# Нажмите «Участие» под анонсом, чтобы попасть в зачёт."
+            stats.append(stat)
+        return stats
 
-        try:
-            contest = await self.bot.db.activity.create_contest(
-                guild_id=inter.guild_id,
-                contest_type=type,
-                started_at=now,
-                ends_at=ends_at,
-                prize=prize,
-                winners_count=winners,
-            )
-        except Exception as e:
-            log.error("contest_create_failed", error=str(e))
-            return await send_notify(inter, "Не удалось запустить конкурс.", is_error=True)
+    # ── Конструктор (кнопки) ─────────────────────────────────────────────────
 
-        try:
-            message = await inter.channel.send(
-                components=[build_contest_announcement(contest, cfg.embed_color)]
-            )
-            await self.bot.db.activity.set_contest_message(
-                contest["id"], channel_id=message.channel.id, message_id=message.id
-            )
-        except Exception as e:
-            log.error("contest_announce_post_failed", contest_id=contest["id"], error=str(e))
-            return await send_notify(
-                inter,
-                "Конкурс создан, но не удалось опубликовать анонс в этом канале.",
-                is_error=True,
-            )
-
-        await send_notify(inter, "Конкурс запущен и опубликован в этом канале.")
-
-    @contest.sub_command(name="stats", description="Статус текущего конкурса")
-    async def contest_stats(self, inter: ApplicationCommandInteraction):
-        await inter.response.defer(ephemeral=True)
-        cfg = await self.bot.get_cfg()
-        contest = await self.bot.db.activity.get_active_contest(inter.guild_id)
-        if not contest:
-            return await send_notify(inter, "Сейчас нет активного конкурса.", is_error=True)
-
-        participants = await self.bot.db.activity.get_participants(contest["id"])
-        entries = await self.bot.db.activity.get_contest_leaderboard(contest["id"], limit=10)
-        await inter.edit_original_message(
-            components=[build_contest_stats(
-                contest=contest,
-                entries=entries,
-                participant_count=len(participants),
-                user_id=inter.author.id,
-                accent=cfg.embed_color,
-            )]
-        )
-
-    @contest.sub_command(name="end", description="Завершить текущий конкурс досрочно")
-    async def contest_end(self, inter: ApplicationCommandInteraction):
+    @Cog.listener("on_button_click")
+    async def on_contest_button(self, inter: MessageInteraction):
+        cid = inter.component.custom_id or ""
+        if not cid.startswith("contest:") or cid.startswith(JOIN_PREFIX):
+            return
         if not isinstance(inter.author, Member):
-            return await inter.response.send_message("Только на сервере.", ephemeral=True)
+            return
 
-        await inter.response.defer(ephemeral=True)
         cfg = await self.bot.get_cfg()
         if not has_contest_permission(cfg, inter.author):
-            return await send_notify(
-                inter, "У вас недостаточно прав для завершения конкурса.", is_error=True
-            )
+            return await inter.response.send_message("Нет доступа.", ephemeral=True)
+        accent = cfg.embed_color
 
-        contest = await self.bot.db.activity.get_active_contest(inter.guild_id)
-        if not contest:
-            return await send_notify(inter, "Сейчас нет активного конкурса.", is_error=True)
+        if cid == NEW_BUTTON:
+            await inter.response.edit_message(components=[build_kind_picker(accent)])
 
-        await self._finish_contest(contest, cfg)
-        await send_notify(inter, "Конкурс завершён, победители объявлены.")
+        elif cid == MAIN_BUTTON:
+            contests = await self.bot.db.activity.get_active_contests(inter.guild_id)
+            stats = await self._build_stats(contests)
+            await inter.response.edit_message(components=[build_contest_main(stats, accent)])
 
-    # ── Participation button ───────────────────────────────────────────────
+        elif cid.startswith(KIND_PREFIX):
+            kind = cid[len(KIND_PREFIX):]
+            await inter.response.edit_message(components=[build_duration_picker(kind, accent)])
+
+        elif cid.startswith(DUR_PREFIX):
+            kind, _, contest_type = cid[len(DUR_PREFIX):].partition(":")
+            await inter.response.send_modal(ContestCreateModal(self.bot, kind, contest_type, accent))
+
+        elif cid.startswith(END_PREFIX):
+            try:
+                contest_id = int(cid[len(END_PREFIX):])
+            except ValueError:
+                return
+            contest = await self.bot.db.activity.get_contest(contest_id)
+            if not contest or not contest.get("is_active"):
+                return await send_notify(inter, "Этот конкурс уже завершён.", is_error=True)
+            await inter.response.defer(ephemeral=True)
+            await self._finish_contest(contest, cfg)
+            await send_notify(inter, "Конкурс завершён, победители объявлены.")
+
+    # ── Кнопка участия ─────────────────────────────────────────────────────────
 
     @Cog.listener("on_button_click")
     async def on_join_button(self, inter: MessageInteraction):
@@ -142,8 +165,8 @@ class ContestCommands(Cog):
         except ValueError:
             return
 
-        contest = await self.bot.db.activity.get_active_contest(inter.guild_id)
-        if not contest or contest["id"] != contest_id:
+        contest = await self.bot.db.activity.get_contest(contest_id)
+        if not contest or not contest.get("is_active"):
             return await send_notify(inter, "Этот конкурс уже завершён.", is_error=True)
 
         try:
@@ -152,9 +175,31 @@ class ContestCommands(Cog):
             log.error("contest_join_failed", contest_id=contest_id, error=str(e))
             return await send_notify(inter, "Не удалось записать участие.", is_error=True)
 
-        await send_notify(inter, "Вы в списке участников конкурса! Набирайте активность в голосовых.")
+        secs = contest.get("min_voice_seconds")
+        if contest.get("kind") == "giveaway" and secs:
+            await send_notify(
+                inter,
+                f"Вы в розыгрыше! Наберите **{format_duration(secs)}** активности в голосовых — "
+                f"при выполнении условия придёт уведомление в личные сообщения.",
+            )
+        else:
+            await send_notify(
+                inter, "Вы в списке участников конкурса! Набирайте активность в голосовых."
+            )
 
-    # ── Auto-completion watcher ──────────────────────────────────────────────
+    # ── Публикация с баннером ────────────────────────────────────────────────
+
+    async def _post_with_banner(self, channel, builder, cfg):
+        """Публикует контейнер в канал, добавляя баннер из ассетов, если он задан."""
+        path = getattr(cfg, "activity_contest_banner_path", None)
+        if path and os.path.exists(path):
+            return await channel.send(
+                components=[builder(BANNER_FILENAME)],
+                file=File(path, filename=BANNER_FILENAME),
+            )
+        return await channel.send(components=[builder(None)])
+
+    # ── Автозавершение и проверка условий ──────────────────────────────────────
 
     @tasks.loop(minutes=5)
     async def _contest_watcher(self):
@@ -162,29 +207,60 @@ class ContestCommands(Cog):
         if guild_id is None:
             return
         try:
-            contest = await self.bot.db.activity.get_active_contest(guild_id)
-            if not contest:
-                return
-            _, ends_at = parse_contest_dates(contest)
-            if datetime.now(UTC) < ends_at:
-                return
-            cfg = await self.bot.get_cfg()
-            await self._finish_contest(contest, cfg)
+            contests = await self.bot.db.activity.get_active_contests(guild_id)
         except Exception as e:
-            log.error("contest_watcher_failed", error=str(e))
+            return log.error("contest_watcher_failed", error=str(e))
+
+        cfg = None
+        now = datetime.now(UTC)
+        for contest in contests:
+            try:
+                _, ends_at = parse_contest_dates(contest)
+                if now >= ends_at:
+                    cfg = cfg or await self.bot.get_cfg()
+                    await self._finish_contest(contest, cfg)
+                elif contest.get("kind") == "giveaway":
+                    await self._check_qualified(contest)
+            except Exception as e:
+                log.error("contest_tick_failed", contest_id=contest.get("id"), error=str(e))
 
     @_contest_watcher.before_loop
     async def _before_watcher(self):
         await self.bot.wait_until_ready()
+
+    async def _check_qualified(self, contest: dict) -> None:
+        result = await self.bot.db.activity.recompute_qualified(contest["id"])
+        newly = result.get("newly_qualified") or []
+        if not newly:
+            return
+        guild = self.bot.get_guild(self.bot.primary_guild_id)
+        if guild is None:
+            return
+        prize = contest.get("prize")
+        prize_line = f"\nПриз: **{prize}**" if prize else ""
+        for user_id in newly:
+            member = guild.get_member(user_id)
+            if member is None:
+                continue
+            try:
+                await member.send(
+                    f"🎉 Вы выполнили условие розыгрыша на **{guild.name}**!{prize_line}\n"
+                    f"Вы попадаете в финальную жеребьёвку победителей."
+                )
+            except Exception:
+                log.info("contest_qualify_dm_failed", contest_id=contest["id"], user_id=user_id)
 
     async def _finish_contest(self, contest: dict, cfg) -> None:
         # Объявление в отдельном try: даже если публикация упадёт, конкурс всё равно
         # должен завершиться — иначе он навсегда останется активным.
         try:
             winners = contest.get("winners_count", 1)
-            entries = await self.bot.db.activity.get_contest_leaderboard(
-                contest["id"], limit=winners,
-            )
+            if contest.get("kind") == "giveaway":
+                qualified = await self.bot.db.activity.get_qualified_participants(contest["id"])
+                chosen = random.sample(qualified, min(winners, len(qualified)))
+                entries = [{"user_id": uid, "total_seconds": 0, "rank": i + 1} for i, uid in enumerate(chosen)]
+            else:
+                entries = await self.bot.db.activity.get_contest_leaderboard(contest["id"], limit=winners)
             await self._announce_winner(contest, entries, cfg)
         except Exception as e:
             log.error("contest_announce_failed", contest_id=contest["id"], error=str(e))
@@ -192,23 +268,27 @@ class ContestCommands(Cog):
         log.info("contest_ended", contest_id=contest["id"])
 
     async def _announce_winner(self, contest: dict, entries: list[dict], cfg) -> None:
-        container = build_contest_ended(contest, entries, cfg.embed_color)
         guild = self.bot.get_guild(self.bot.primary_guild_id)
         if guild is None:
             return
 
+        def builder(image_filename):
+            return build_contest_ended(contest, entries, cfg.embed_color, image_filename)
+
         # Предпочтительно — опубликовать результат в канале конкурса и погасить кнопку
-        # «Участие» в исходном анонсе (редактируем его на тот же контейнер).
+        # «Участие» в исходном анонсе (редактируем его без файла — баннер несёт свежее сообщение).
         channel_id = contest.get("channel_id")
         message_id = contest.get("message_id")
         if channel_id:
             channel = guild.get_channel(channel_id)
             if channel is not None:
                 try:
-                    await channel.send(components=[container])
+                    await self._post_with_banner(channel, builder, cfg)
                     if message_id:
                         try:
-                            await channel.get_partial_message(message_id).edit(components=[container])
+                            await channel.get_partial_message(message_id).edit(
+                                components=[builder(None)]
+                            )
                         except Exception:
                             pass
                     return
@@ -218,10 +298,92 @@ class ContestCommands(Cog):
         # Фолбэк — канал результатов из конфига.
         results_id = cfg.activity_results_channel_id
         if results_id is None:
-            log.warning("contest_results_channel_unset", contest_id=contest["id"])
-            return
+            return log.warning("contest_results_channel_unset", contest_id=contest["id"])
         channel = guild.get_channel(results_id)
         if channel is None:
-            log.warning("contest_results_channel_not_found", channel_id=results_id)
-            return
-        await channel.send(components=[container])
+            return log.warning("contest_results_channel_not_found", channel_id=results_id)
+        await self._post_with_banner(channel, builder, cfg)
+
+
+class ContestCreateModal(Modal):
+    def __init__(self, bot: AutoShardedBot, kind: str, contest_type: str, accent: int):
+        self.bot = bot
+        self.kind = kind
+        self.contest_type = contest_type
+        self.accent = accent
+        components = [
+            TextInput(label="Приз", custom_id="prize", placeholder="Что разыгрываем", max_length=200),
+            TextInput(label="Сколько победителей", custom_id="winners", placeholder="1", value="1", max_length=2),
+        ]
+        if kind == "giveaway":
+            components.append(
+                TextInput(
+                    label="Мин. активность в голосовых (минуты)",
+                    custom_id="min_minutes",
+                    placeholder="60",
+                    max_length=5,
+                )
+            )
+        super().__init__(
+            title=f"Новый конкурс · {CONTEST_KIND_LABEL.get(kind, kind)}",
+            custom_id=f"contest_create:{kind}:{contest_type}",
+            components=components,
+        )
+
+    async def callback(self, inter: ModalInteraction):
+        await inter.response.defer(ephemeral=True)
+        cog: ContestCommands = self.bot.get_cog("ContestCommands")
+
+        prize = inter.text_values["prize"].strip() or None
+        try:
+            winners = int(inter.text_values["winners"].strip() or "1")
+            if not 1 <= winners <= 20:
+                raise ValueError
+        except ValueError:
+            return await send_notify(inter, "Число победителей должно быть от 1 до 20.", is_error=True)
+
+        min_voice_seconds = None
+        if self.kind == "giveaway":
+            try:
+                minutes = int(inter.text_values["min_minutes"].strip())
+                if minutes <= 0:
+                    raise ValueError
+            except ValueError:
+                return await send_notify(inter, "Минимальная активность должна быть числом минут больше 0.", is_error=True)
+            min_voice_seconds = minutes * 60
+
+        cfg = await self.bot.get_cfg()
+        now = datetime.now(UTC)
+        ends_at = now + CONTEST_DURATIONS[self.contest_type]
+
+        try:
+            contest = await self.bot.db.activity.create_contest(
+                guild_id=inter.guild_id,
+                contest_type=self.contest_type,
+                kind=self.kind,
+                started_at=now,
+                ends_at=ends_at,
+                prize=prize,
+                winners_count=winners,
+                min_voice_seconds=min_voice_seconds,
+            )
+        except Exception as e:
+            log.error("contest_create_failed", error=str(e))
+            return await send_notify(inter, "Не удалось создать конкурс.", is_error=True)
+
+        try:
+            message = await cog._post_with_banner(
+                inter.channel,
+                lambda img: build_contest_announcement(contest, cfg.embed_color, img),
+                cfg,
+            )
+            await self.bot.db.activity.set_contest_message(
+                contest["id"], channel_id=message.channel.id, message_id=message.id
+            )
+        except Exception as e:
+            log.error("contest_announce_post_failed", contest_id=contest["id"], error=str(e))
+            return await send_notify(
+                inter, "Конкурс создан, но не удалось опубликовать анонс в этом канале.", is_error=True
+            )
+
+        await send_notify(inter, "Конкурс создан и опубликован в этом канале.")
