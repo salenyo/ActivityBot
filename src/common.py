@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from disnake import Member
 
-from hydra_shared.decorators.permissions import has_role_access
+from hydra_shared.decorators.permissions import has_bypass
 
 UTC = timezone.utc
 
@@ -125,5 +125,6 @@ def parse_contest_dates(contest: dict) -> tuple[datetime, datetime]:
 
 
 def has_contest_permission(cfg, member: Member) -> bool:
-    # Общая ролевая проверка из ядра: админ/владелец ИЛИ роль из конфига.
-    return has_role_access(cfg, member, "activity_contest_role_ids")
+    # Создавать/завершать конкурсы могут только обладатели роли с правом администратора
+    # (или владельцы из owner_ids). Остальным /contest показывает лишь действующие конкурсы.
+    return has_bypass(cfg, member)
