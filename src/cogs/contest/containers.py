@@ -56,6 +56,11 @@ def _media(image_filename: str | None) -> list:
     return [MediaGallery(MediaGalleryItem(media=f"attachment://{image_filename}"))]
 
 
+def _desc_md(desc: str) -> str:
+    """Описание заголовком ### — крупнее и контрастнее обычного текста, не сливается с фоном."""
+    return "\n".join(f"### {ln}" if ln.strip() else ln for ln in desc.splitlines())
+
+
 def _sponsor_button(contest: dict) -> Button | None:
     url = contest.get("sponsor_url")
     if not url:
@@ -96,7 +101,7 @@ def build_contest_announcement(contest: dict, accent: int, image_filename: str |
         *_media(image_filename),
     ]
     if desc:
-        blocks.append(TextDisplay(desc))
+        blocks.append(TextDisplay(_desc_md(desc)))
         blocks.append(Separator(divider=False))
     blocks.append(TextDisplay(_fields(contest)))
     blocks.append(Separator(divider=False))
@@ -140,7 +145,7 @@ def build_contest_ended(contest: dict, entries: list[dict], accent: int, image_f
         *_media(image_filename),
     ]
     if desc:
-        blocks.append(TextDisplay(desc))
+        blocks.append(TextDisplay(_desc_md(desc)))
         blocks.append(Separator(divider=False))
     if prize:
         blocks.append(TextDisplay(f"**Приз** — {prize}"))
