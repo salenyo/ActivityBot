@@ -369,6 +369,15 @@ class ContestCreateModal(Modal):
                     max_length=5,
                 )
             )
+        components.append(
+            TextInput(
+                label="Спонсор — ссылка (необязательно)",
+                custom_id="sponsor",
+                placeholder="https://...",
+                required=False,
+                max_length=300,
+            )
+        )
         super().__init__(
             title=f"Новый конкурс · {CONTEST_KIND_LABEL.get(kind, kind)}",
             custom_id=f"contest_create:{kind}:{contest_type}",
@@ -397,6 +406,12 @@ class ContestCreateModal(Modal):
                 return await send_notify(inter, "Минимальная активность должна быть числом минут больше 0.", is_error=True)
             min_voice_seconds = minutes * 60
 
+        sponsor_url = inter.text_values.get("sponsor", "").strip() or None
+        if sponsor_url and not sponsor_url.startswith(("http://", "https://")):
+            return await send_notify(
+                inter, "Ссылка спонсора должна начинаться с http:// или https://", is_error=True
+            )
+
         cfg = await self.bot.get_cfg()
         now = datetime.now(UTC)
         if self.is_custom:
@@ -424,6 +439,7 @@ class ContestCreateModal(Modal):
                 prize=prize,
                 winners_count=winners,
                 min_voice_seconds=min_voice_seconds,
+                sponsor_url=sponsor_url,
             )
         except Exception as e:
             log.error("contest_create_failed", error=str(e))

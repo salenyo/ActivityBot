@@ -62,6 +62,13 @@ def _media(image_filename: str | None) -> list:
     return [MediaGallery(MediaGalleryItem(media=f"attachment://{image_filename}"))]
 
 
+def _sponsor_button(contest: dict) -> Button | None:
+    url = contest.get("sponsor_url")
+    if not url:
+        return None
+    return Button(label="Спонсор", emoji="🔗", style=ButtonStyle.link, url=url)
+
+
 # ── Публичный анонс ──────────────────────────────────────────────────────────
 
 
@@ -104,7 +111,8 @@ def build_contest_announcement(contest: dict, accent: int, image_filename: str |
                 emoji="🎟️",
                 style=ButtonStyle.green,
                 custom_id=f"{JOIN_PREFIX}{contest['id']}",
-            )
+            ),
+            *([b] if (b := _sponsor_button(contest)) else []),
         ),
         accent_colour=Colour(accent),
     )
@@ -139,6 +147,9 @@ def build_contest_ended(contest: dict, entries: list[dict], accent: int, image_f
     if board_text:
         blocks.append(Separator(divider=False))
         blocks.append(TextDisplay(board_text))
+    sponsor = _sponsor_button(contest)
+    if sponsor:
+        blocks.append(ActionRow(sponsor))
     return Container(*blocks, accent_colour=Colour(accent))
 
 
