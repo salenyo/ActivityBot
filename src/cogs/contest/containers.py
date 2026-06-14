@@ -132,12 +132,16 @@ def build_contest_ended(contest: dict, entries: list[dict], accent: int, image_f
         ]
 
     prize = contest.get("prize")
+    desc = contest.get("description")
     blocks = [
         TextDisplay(f"## Итоги · {_kind_label(contest)}"),
         TextDisplay(f"-# {_type_label(contest)}"),
         Separator(),
         *_media(image_filename),
     ]
+    if desc:
+        blocks.append(TextDisplay(desc))
+        blocks.append(Separator(divider=False))
     if prize:
         blocks.append(TextDisplay(f"**Приз** — {prize}"))
     blocks.append(TextDisplay(f"**{head}**" if winner_entries else head))
