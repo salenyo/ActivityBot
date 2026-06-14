@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 from disnake import Member
@@ -7,6 +8,8 @@ from disnake import Member
 from hydra_shared.decorators.permissions import has_role_access
 
 UTC = timezone.utc
+
+MAX_CONTEST_SECONDS = 365 * 86400  # верхняя граница произвольной длительности конкурса
 
 CONTEST_DURATIONS: dict[str, timedelta] = {
     "day": timedelta(days=1),
@@ -60,6 +63,55 @@ def time_left(ends_at: datetime) -> str:
     if h:
         return f"{h}ч {m}мин"
     return f"{m}мин"
+
+
+def _unit_seconds(unit: str) -> int | None:
+    u = unit.lower()
+    # Порядок важен: «мес»/«нед» проверяем до «м» (минут), иначе перехватит минутами.
+    if u in {"w", "week", "weeks"} or u.startswith("нед"):
+        return 7 * 86400
+    if u in {"mo", "mon", "month", "months"} or u.startswith("мес"):
+        return 30 * 86400
+    if u in {"d", "day", "days"} or u == "д" or u.startswith(("дн", "день", "дня", "дней", "сут", "су")):
+        return 86400
+    if u in {"h", "hr", "hrs", "hour", "hours"} or u.startswith(("час", "ч")):
+        return 3600
+    if u in {"m", "min", "mins", "minute", "minutes"} or u.startswith(("мин", "м")):
+        return 60
+    return None
+
+
+def parse_duration(text: str) -> timedelta | None:
+    """Парсит произвольную длительность вида «2д 3ч», «1 день 12 часов», «90 мин».
+
+    Возвращает None, если ничего не распознано или результат вне диапазона
+    (1 минута … MAX_CONTEST_SECONDS).
+    """
+    total = 0
+    matched = False
+    for num, unit in re.findall(r"(\d+)\s*([a-zA-Zа-яА-Я]+)", text):
+        mult = _unit_seconds(unit)
+        if mult is None:
+            continue
+        total += int(num) * mult
+        matched = True
+    if not matched or not (60 <= total <= MAX_CONTEST_SECONDS):
+        return None
+    return timedelta(seconds=total)
+
+
+def duration_label(seconds: int) -> str:
+    d, rem = divmod(seconds, 86400)
+    h, rem = divmod(rem, 3600)
+    m = rem // 60
+    parts = []
+    if d:
+        parts.append(f"{d}д")
+    if h:
+        parts.append(f"{h}ч")
+    if m:
+        parts.append(f"{m}мин")
+    return " ".join(parts) or "0мин"
 
 
 def parse_contest_dates(contest: dict) -> tuple[datetime, datetime]:

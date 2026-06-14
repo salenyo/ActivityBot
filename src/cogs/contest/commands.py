@@ -21,10 +21,12 @@ from hydra_shared.ui import send_notify
 from src.common import (
     CONTEST_DURATIONS,
     CONTEST_KIND_LABEL,
+    duration_label,
     format_duration,
     has_contest_permission,
     medal,
     parse_contest_dates,
+    parse_duration,
 )
 
 from .containers import (
@@ -45,6 +47,8 @@ from .containers import (
 log = get_logger(__name__)
 UTC = timezone.utc
 BANNER_FILENAME = "contest.png"
+# Ключ Redis с таймстемпом захода в войс — совпадает с VoiceTracker (cogs/voice_tracker).
+VOICE_KEY = "activity:voice:{user_id}"
 
 
 class ContestCommands(Cog):
@@ -228,8 +232,35 @@ class ContestCommands(Cog):
     async def _before_watcher(self):
         await self.bot.wait_until_ready()
 
+    async def _voice_extra(self, contest: dict, until: datetime) -> dict[int, int]:
+        """Доп. секунды живых (ещё не закрытых) голосовых сессий участников из Redis.
+
+        В voice_sessions такие сессии появятся только после выхода из войса, поэтому их
+        учитываем отдельно — как пересечение [join, until] с началом окна конкурса.
+        """
+        participants = await self.bot.db.activity.get_participants(contest["id"])
+        if not participants:
+            return {}
+        started_at, _ = parse_contest_dates(contest)
+        extra: dict[int, int] = {}
+        for user_id in participants:
+            try:
+                joined_ts = await self.bot.redis.get(VOICE_KEY.format(user_id=user_id))
+            except Exception:
+                continue
+            if not joined_ts:
+                continue
+            joined_at = datetime.fromtimestamp(int(joined_ts), UTC)
+            overlap_start = max(joined_at, started_at)
+            secs = int((until - overlap_start).total_seconds())
+            if secs > 0:
+                extra[user_id] = secs
+        return extra
+
     async def _check_qualified(self, contest: dict) -> None:
-        result = await self.bot.db.activity.recompute_qualified(contest["id"])
+        now = datetime.now(UTC)
+        extra = await self._voice_extra(contest, now)
+        result = await self.bot.db.activity.recompute_qualified(contest["id"], extra_seconds=extra)
         newly = result.get("newly_qualified") or []
         if not newly:
             return
@@ -256,6 +287,10 @@ class ContestCommands(Cog):
         try:
             winners = contest.get("winners_count", 1)
             if contest.get("kind") == "giveaway":
+                # Финальная сверка с учётом живых сессий, обрезанных по концу конкурса.
+                _, ends_at = parse_contest_dates(contest)
+                extra = await self._voice_extra(contest, ends_at)
+                await self.bot.db.activity.recompute_qualified(contest["id"], extra_seconds=extra)
                 qualified = await self.bot.db.activity.get_qualified_participants(contest["id"])
                 chosen = random.sample(qualified, min(winners, len(qualified)))
                 entries = [{"user_id": uid, "total_seconds": 0, "rank": i + 1} for i, uid in enumerate(chosen)]
@@ -310,11 +345,21 @@ class ContestCreateModal(Modal):
         self.bot = bot
         self.kind = kind
         self.contest_type = contest_type
+        self.is_custom = contest_type == "custom"
         self.accent = accent
         components = [
             TextInput(label="Приз", custom_id="prize", placeholder="Что разыгрываем", max_length=200),
             TextInput(label="Сколько победителей", custom_id="winners", placeholder="1", value="1", max_length=2),
         ]
+        if self.is_custom:
+            components.append(
+                TextInput(
+                    label="Длительность",
+                    custom_id="duration",
+                    placeholder="например: 2д 3ч · 1 день 12 часов · 90 мин",
+                    max_length=30,
+                )
+            )
         if kind == "giveaway":
             components.append(
                 TextInput(
@@ -354,12 +399,25 @@ class ContestCreateModal(Modal):
 
         cfg = await self.bot.get_cfg()
         now = datetime.now(UTC)
-        ends_at = now + CONTEST_DURATIONS[self.contest_type]
+        if self.is_custom:
+            delta = parse_duration(inter.text_values["duration"])
+            if delta is None:
+                return await send_notify(
+                    inter,
+                    "Не понял длительность. Примеры: «2д 3ч», «1 день 12 часов», «90 мин» "
+                    "(от 1 минуты до 365 дней).",
+                    is_error=True,
+                )
+            ends_at = now + delta
+            contest_type = duration_label(int(delta.total_seconds()))
+        else:
+            ends_at = now + CONTEST_DURATIONS[self.contest_type]
+            contest_type = self.contest_type
 
         try:
             contest = await self.bot.db.activity.create_contest(
                 guild_id=inter.guild_id,
-                contest_type=self.contest_type,
+                contest_type=contest_type,
                 kind=self.kind,
                 started_at=now,
                 ends_at=ends_at,

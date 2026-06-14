@@ -257,12 +257,13 @@ def build_kind_picker(accent: int) -> Container:
 def build_duration_picker(kind: str, accent: int) -> Container:
     kind_label = CONTEST_KIND_LABEL.get(kind, kind)
     return Container(
-        TextDisplay(f"## ➕ Новый конкурс · {kind_label}\nВыберите длительность."),
+        TextDisplay(f"## ➕ Новый конкурс · {kind_label}\nВыберите длительность или задайте свою."),
         Separator(divider=False),
         ActionRow(
             Button(label="День", style=ButtonStyle.primary, custom_id=f"{DUR_PREFIX}{kind}:day"),
             Button(label="Неделя", style=ButtonStyle.primary, custom_id=f"{DUR_PREFIX}{kind}:week"),
             Button(label="Месяц", style=ButtonStyle.primary, custom_id=f"{DUR_PREFIX}{kind}:month"),
+            Button(label="Другое", emoji="✏️", style=ButtonStyle.secondary, custom_id=f"{DUR_PREFIX}{kind}:custom"),
         ),
         ActionRow(
             Button(label="Назад", style=ButtonStyle.secondary, custom_id=NEW_BUTTON),
