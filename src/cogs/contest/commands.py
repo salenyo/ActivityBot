@@ -10,6 +10,7 @@ from disnake import (
     Member,
     MessageInteraction,
     ModalInteraction,
+    TextInputStyle,
 )
 from disnake.ext import tasks
 from disnake.ext.commands import AutoShardedBot, Cog, slash_command
@@ -36,7 +37,9 @@ from .containers import (
     KIND_PREFIX,
     MAIN_BUTTON,
     NEW_BUTTON,
+    SPONSOR_PREFIX,
     build_contest_announcement,
+    build_contest_created,
     build_contest_ended,
     build_contest_main,
     build_contest_overview,
@@ -157,6 +160,13 @@ class ContestCommands(Cog):
             await self._finish_contest(contest, cfg)
             await send_notify(inter, "Конкурс завершён, победители объявлены.")
 
+        elif cid.startswith(SPONSOR_PREFIX):
+            try:
+                contest_id = int(cid[len(SPONSOR_PREFIX):])
+            except ValueError:
+                return
+            await inter.response.send_modal(ContestSponsorModal(self.bot, contest_id, accent))
+
     # ── Кнопка участия ─────────────────────────────────────────────────────────
 
     @Cog.listener("on_button_click")
@@ -232,35 +242,26 @@ class ContestCommands(Cog):
     async def _before_watcher(self):
         await self.bot.wait_until_ready()
 
-    async def _voice_extra(self, contest: dict, until: datetime) -> dict[int, int]:
-        """Доп. секунды живых (ещё не закрытых) голосовых сессий участников из Redis.
+    async def _live_sessions(self, contest: dict) -> dict[int, int]:
+        """Открытые (ещё не закрытые) голосовые сессии участников: user_id -> unix-таймстемп.
 
-        В voice_sessions такие сессии появятся только после выхода из войса, поэтому их
-        учитываем отдельно — как пересечение [join, until] с началом окна конкурса.
+        Берём из Redis (тот же ключ, что у VoiceTracker). Самой сессии в voice_sessions ещё
+        нет — она появится после выхода из войса. Окно зачёта считает уже DB-API.
         """
         participants = await self.bot.db.activity.get_participants(contest["id"])
-        if not participants:
-            return {}
-        started_at, _ = parse_contest_dates(contest)
-        extra: dict[int, int] = {}
+        live: dict[int, int] = {}
         for user_id in participants:
             try:
                 joined_ts = await self.bot.redis.get(VOICE_KEY.format(user_id=user_id))
             except Exception:
                 continue
-            if not joined_ts:
-                continue
-            joined_at = datetime.fromtimestamp(int(joined_ts), UTC)
-            overlap_start = max(joined_at, started_at)
-            secs = int((until - overlap_start).total_seconds())
-            if secs > 0:
-                extra[user_id] = secs
-        return extra
+            if joined_ts:
+                live[user_id] = int(joined_ts)
+        return live
 
     async def _check_qualified(self, contest: dict) -> None:
-        now = datetime.now(UTC)
-        extra = await self._voice_extra(contest, now)
-        result = await self.bot.db.activity.recompute_qualified(contest["id"], extra_seconds=extra)
+        live = await self._live_sessions(contest)
+        result = await self.bot.db.activity.recompute_qualified(contest["id"], live_sessions=live)
         newly = result.get("newly_qualified") or []
         if not newly:
             return
@@ -287,10 +288,9 @@ class ContestCommands(Cog):
         try:
             winners = contest.get("winners_count", 1)
             if contest.get("kind") == "giveaway":
-                # Финальная сверка с учётом живых сессий, обрезанных по концу конкурса.
-                _, ends_at = parse_contest_dates(contest)
-                extra = await self._voice_extra(contest, ends_at)
-                await self.bot.db.activity.recompute_qualified(contest["id"], extra_seconds=extra)
+                # Финальная сверка: сервер сам обрежет окно по концу конкурса (now >= ends_at).
+                live = await self._live_sessions(contest)
+                await self.bot.db.activity.recompute_qualified(contest["id"], live_sessions=live)
                 qualified = await self.bot.db.activity.get_qualified_participants(contest["id"])
                 chosen = random.sample(qualified, min(winners, len(qualified)))
                 entries = [{"user_id": uid, "total_seconds": 0, "rank": i + 1} for i, uid in enumerate(chosen)]
@@ -349,6 +349,14 @@ class ContestCreateModal(Modal):
         self.accent = accent
         components = [
             TextInput(label="Приз", custom_id="prize", placeholder="Что разыгрываем", max_length=200),
+            TextInput(
+                label="Описание (необязательно)",
+                custom_id="description",
+                style=TextInputStyle.paragraph,
+                placeholder="Условия, детали, призовые места…",
+                required=False,
+                max_length=1000,
+            ),
             TextInput(label="Сколько победителей", custom_id="winners", placeholder="1", value="1", max_length=2),
         ]
         if self.is_custom:
@@ -369,15 +377,6 @@ class ContestCreateModal(Modal):
                     max_length=5,
                 )
             )
-        components.append(
-            TextInput(
-                label="Спонсор — ссылка (необязательно)",
-                custom_id="sponsor",
-                placeholder="https://...",
-                required=False,
-                max_length=300,
-            )
-        )
         super().__init__(
             title=f"Новый конкурс · {CONTEST_KIND_LABEL.get(kind, kind)}",
             custom_id=f"contest_create:{kind}:{contest_type}",
@@ -389,6 +388,7 @@ class ContestCreateModal(Modal):
         cog: ContestCommands = self.bot.get_cog("ContestCommands")
 
         prize = inter.text_values["prize"].strip() or None
+        description = inter.text_values.get("description", "").strip() or None
         try:
             winners = int(inter.text_values["winners"].strip() or "1")
             if not 1 <= winners <= 20:
@@ -405,12 +405,6 @@ class ContestCreateModal(Modal):
             except ValueError:
                 return await send_notify(inter, "Минимальная активность должна быть числом минут больше 0.", is_error=True)
             min_voice_seconds = minutes * 60
-
-        sponsor_url = inter.text_values.get("sponsor", "").strip() or None
-        if sponsor_url and not sponsor_url.startswith(("http://", "https://")):
-            return await send_notify(
-                inter, "Ссылка спонсора должна начинаться с http:// или https://", is_error=True
-            )
 
         cfg = await self.bot.get_cfg()
         now = datetime.now(UTC)
@@ -437,9 +431,9 @@ class ContestCreateModal(Modal):
                 started_at=now,
                 ends_at=ends_at,
                 prize=prize,
+                description=description,
                 winners_count=winners,
                 min_voice_seconds=min_voice_seconds,
-                sponsor_url=sponsor_url,
             )
         except Exception as e:
             log.error("contest_create_failed", error=str(e))
@@ -460,4 +454,61 @@ class ContestCreateModal(Modal):
                 inter, "Конкурс создан, но не удалось опубликовать анонс в этом канале.", is_error=True
             )
 
-        await send_notify(inter, "Конкурс создан и опубликован в этом канале.")
+        await inter.edit_original_message(
+            components=[build_contest_created(contest, cfg.embed_color)]
+        )
+
+
+class ContestSponsorModal(Modal):
+    def __init__(self, bot: AutoShardedBot, contest_id: int, accent: int):
+        self.bot = bot
+        self.contest_id = contest_id
+        self.accent = accent
+        super().__init__(
+            title="Спонсор конкурса",
+            custom_id=f"contest_sponsor:{contest_id}",
+            components=[
+                TextInput(
+                    label="Ссылка спонсора",
+                    custom_id="sponsor",
+                    placeholder="https://… (пусто — убрать кнопку)",
+                    required=False,
+                    max_length=300,
+                )
+            ],
+        )
+
+    async def callback(self, inter: ModalInteraction):
+        await inter.response.defer(ephemeral=True)
+        sponsor_url = inter.text_values.get("sponsor", "").strip() or None
+        if sponsor_url and not sponsor_url.startswith(("http://", "https://")):
+            return await send_notify(
+                inter, "Ссылка спонсора должна начинаться с http:// или https://", is_error=True
+            )
+
+        try:
+            contest = await self.bot.db.activity.set_contest_sponsor(self.contest_id, sponsor_url)
+        except Exception as e:
+            log.error("contest_sponsor_set_failed", contest_id=self.contest_id, error=str(e))
+            return await send_notify(inter, "Не удалось сохранить спонсора.", is_error=True)
+
+        # Обновляем опубликованный анонс, чтобы появилась/исчезла кнопка спонсора.
+        cfg = await self.bot.get_cfg()
+        path = getattr(cfg, "activity_contest_banner_path", None)
+        img = BANNER_FILENAME if (path and os.path.exists(path)) else None
+        guild = self.bot.get_guild(self.bot.primary_guild_id)
+        channel_id = contest.get("channel_id")
+        message_id = contest.get("message_id")
+        if guild and channel_id and message_id:
+            channel = guild.get_channel(channel_id)
+            if channel is not None:
+                try:
+                    await channel.get_partial_message(message_id).edit(
+                        components=[build_contest_announcement(contest, cfg.embed_color, img)]
+                    )
+                except Exception as e:
+                    log.warning("contest_sponsor_edit_failed", contest_id=self.contest_id, error=str(e))
+
+        await send_notify(
+            inter, "Спонсор добавлен." if sponsor_url else "Ссылка спонсора убрана."
+        )

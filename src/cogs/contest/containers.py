@@ -21,6 +21,7 @@ MAIN_BUTTON = "contest:main"
 KIND_PREFIX = "contest:kind:"
 DUR_PREFIX = "contest:dur:"
 END_PREFIX = "contest:end:"
+SPONSOR_PREFIX = "contest:sponsor:"
 
 
 def _ends_at(contest: dict) -> datetime:
@@ -99,10 +100,12 @@ def build_contest_announcement(contest: dict, accent: int, image_filename: str |
         f"Завершение: <t:{ts}:F> · <t:{ts}:R>"
     )
 
+    desc = contest.get("description")
     return Container(
         TextDisplay(f"## 🏆 {_title(contest, 'Конкурс ·')}"),
         Separator(),
         *_media(image_filename),
+        *([TextDisplay(desc), Separator(divider=False)] if desc else []),
         TextDisplay(body),
         Separator(divider=False),
         ActionRow(
@@ -278,6 +281,24 @@ def build_duration_picker(kind: str, accent: int) -> Container:
         ),
         ActionRow(
             Button(label="Назад", style=ButtonStyle.secondary, custom_id=NEW_BUTTON),
+        ),
+        accent_colour=Colour(accent),
+    )
+
+
+def build_contest_created(contest: dict, accent: int) -> Container:
+    """Эфемерный ответ после создания: успех + кнопка добавить ссылку спонсора."""
+    return Container(
+        TextDisplay("## Успешно\nКонкурс создан и опубликован в этом канале."),
+        Separator(divider=False),
+        TextDisplay("-# Можно добавить спонсора — кнопка-ссылка появится рядом с «Участие»."),
+        ActionRow(
+            Button(
+                label="Спонсор (ссылка)",
+                emoji="🔗",
+                style=ButtonStyle.secondary,
+                custom_id=f"{SPONSOR_PREFIX}{contest['id']}",
+            )
         ),
         accent_colour=Colour(accent),
     )
