@@ -29,9 +29,10 @@ class VoiceTracker(Cog):
         return _KEY.format(user_id=user_id)
 
     def _is_tracked(self, channel, cfg) -> bool:
-        if cfg.activity_tracked_category_id is None:
+        cats = cfg.activity_tracked_category_ids or []
+        if not cats:
             return False
-        if channel.category_id != cfg.activity_tracked_category_id:
+        if channel.category_id not in cats:
             return False
         if channel.id in (cfg.activity_excluded_channel_ids or []):
             return False
@@ -77,28 +78,29 @@ class VoiceTracker(Cog):
             cfg = await self.bot.get_cfg()
         except Exception:
             return
-        if cfg.activity_tracked_category_id is None:
+        cats = cfg.activity_tracked_category_ids or []
+        if not cats:
             return
 
         guild = self.bot.get_guild(self.bot.primary_guild_id)
         if guild is None:
             return
 
-        category = guild.get_channel(cfg.activity_tracked_category_id)
-        if not isinstance(category, CategoryChannel):
-            return
-
         now_ts = str(int(datetime.now(UTC).timestamp()))
         excluded = set(cfg.activity_excluded_channel_ids or [])
-        for channel in category.voice_channels:
-            if channel.id in excluded:
+        for cat_id in cats:
+            category = guild.get_channel(cat_id)
+            if not isinstance(category, CategoryChannel):
                 continue
-            for member in channel.members:
-                if member.bot:
+            for channel in category.voice_channels:
+                if channel.id in excluded:
                     continue
-                key = self._redis_key(member.id)
-                if not await self.bot.redis.exists(key):
-                    await self.bot.redis.set(key, now_ts)
+                for member in channel.members:
+                    if member.bot:
+                        continue
+                    key = self._redis_key(member.id)
+                    if not await self.bot.redis.exists(key):
+                        await self.bot.redis.set(key, now_ts)
 
         log.info("voice_tracker_synced")
 
