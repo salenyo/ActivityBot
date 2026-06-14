@@ -45,6 +45,8 @@ from .containers import (
     build_contest_overview,
     build_duration_picker,
     build_kind_picker,
+    build_qualify_dm,
+    build_winner_dm,
 )
 
 log = get_logger(__name__)
@@ -268,17 +270,14 @@ class ContestCommands(Cog):
         guild = self.bot.get_guild(self.bot.primary_guild_id)
         if guild is None:
             return
-        prize = contest.get("prize")
-        prize_line = f"\nПриз: **{prize}**" if prize else ""
+        cfg = await self.bot.get_cfg()
+        container = build_qualify_dm(contest, guild.name, cfg.embed_color)
         for user_id in newly:
             member = guild.get_member(user_id)
             if member is None:
                 continue
             try:
-                await member.send(
-                    f"🎉 Вы выполнили условие розыгрыша на **{guild.name}**!{prize_line}\n"
-                    f"Вы попадаете в финальную жеребьёвку победителей."
-                )
+                await member.send(components=[container])
             except Exception:
                 log.info("contest_qualify_dm_failed", contest_id=contest["id"], user_id=user_id)
 
@@ -297,10 +296,27 @@ class ContestCommands(Cog):
             else:
                 entries = await self.bot.db.activity.get_contest_leaderboard(contest["id"], limit=winners)
             await self._announce_winner(contest, entries, cfg)
+            await self._notify_winners(contest, entries, cfg)
         except Exception as e:
             log.error("contest_announce_failed", contest_id=contest["id"], error=str(e))
         await self.bot.db.activity.end_contest(contest["id"])
         log.info("contest_ended", contest_id=contest["id"])
+
+    async def _notify_winners(self, contest: dict, entries: list[dict], cfg) -> None:
+        if not entries:
+            return
+        guild = self.bot.get_guild(self.bot.primary_guild_id)
+        if guild is None:
+            return
+        container = build_winner_dm(contest, guild.name, cfg.embed_color)
+        for entry in entries:
+            member = guild.get_member(entry["user_id"])
+            if member is None:
+                continue
+            try:
+                await member.send(components=[container])
+            except Exception:
+                log.info("contest_winner_dm_failed", contest_id=contest["id"], user_id=entry["user_id"])
 
     async def _announce_winner(self, contest: dict, entries: list[dict], cfg) -> None:
         guild = self.bot.get_guild(self.bot.primary_guild_id)
@@ -310,25 +326,22 @@ class ContestCommands(Cog):
         def builder(image_filename):
             return build_contest_ended(contest, entries, cfg.embed_color, image_filename)
 
-        # Предпочтительно — опубликовать результат в канале конкурса и погасить кнопку
-        # «Участие» в исходном анонсе (редактируем его без файла — баннер несёт свежее сообщение).
+        # В канале конкурса: удаляем старый анонс и публикуем свежее сообщение с итогами.
         channel_id = contest.get("channel_id")
         message_id = contest.get("message_id")
         if channel_id:
             channel = guild.get_channel(channel_id)
             if channel is not None:
+                if message_id:
+                    try:
+                        await channel.get_partial_message(message_id).delete()
+                    except Exception:
+                        pass
                 try:
                     await self._post_with_banner(channel, builder, cfg)
-                    if message_id:
-                        try:
-                            await channel.get_partial_message(message_id).edit(
-                                components=[builder(None)]
-                            )
-                        except Exception:
-                            pass
                     return
                 except Exception as e:
-                    log.warning("contest_edit_announce_failed", contest_id=contest["id"], error=str(e))
+                    log.warning("contest_announce_post_failed", contest_id=contest["id"], error=str(e))
 
         # Фолбэк — канал результатов из конфига.
         results_id = cfg.activity_results_channel_id
