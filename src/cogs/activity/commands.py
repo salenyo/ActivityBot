@@ -16,20 +16,33 @@ from .containers import (
 log = get_logger(__name__)
 UTC = timezone.utc
 
-_PERIOD_DELTA: dict[str, timedelta | None] = {
-    "day": timedelta(days=1),
-    "week": timedelta(days=7),
-    "month": timedelta(days=30),
-    "all": None,
-}
 _ALL_TIME_START = datetime(2020, 1, 1, tzinfo=UTC)
+# Календарные периоды отсчитываем по Москве (UTC+3, без перехода на летнее время),
+# чтобы «день/неделя/месяц» совпадали с местными сутками, а не с UTC.
+MSK = timezone(timedelta(hours=3))
 
 
 def _period_window(period: str) -> tuple[datetime, datetime]:
+    """Границы ТЕКУЩЕГО календарного периода (а не «последних N дней»).
+
+    day   — с местной полуночи сегодня;
+    week  — с понедельника текущей недели;
+    month — с 1-го числа текущего месяца;
+    all   — с фиксированной отправной точки.
+    Возвращаем границы в UTC, т.к. сессии в БД хранятся в UTC.
+    """
     now = datetime.now(UTC)
-    delta = _PERIOD_DELTA.get(period)
-    from_dt = _ALL_TIME_START if delta is None else now - delta
-    return from_dt, now
+    if period == "all":
+        return _ALL_TIME_START, now
+    local = now.astimezone(MSK)
+    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "week":
+        start = midnight - timedelta(days=local.weekday())
+    elif period == "month":
+        start = midnight.replace(day=1)
+    else:  # day и любые неизвестные значения
+        start = midnight
+    return start.astimezone(UTC), now
 
 
 class ActivityCommands(Cog):
