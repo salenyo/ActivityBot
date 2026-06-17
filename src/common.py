@@ -3,13 +3,17 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
-from disnake import Member
+from hydra_shared.decorators.permissions import has_perm, register_perm
 
-from hydra_shared.decorators.permissions import has_bypass
+PERM_CONTEST_MANAGE = register_perm(
+    "activity.contest.manage",
+    description="Управление конкурсами активности",
+    category="activity",
+)
 
 UTC = timezone.utc
 
-MAX_CONTEST_SECONDS = 365 * 86400  # верхняя граница произвольной длительности конкурса
+MAX_CONTEST_SECONDS = 365 * 86400  
 
 CONTEST_DURATIONS: dict[str, timedelta] = {
     "day": timedelta(days=1),
@@ -124,7 +128,8 @@ def parse_contest_dates(contest: dict) -> tuple[datetime, datetime]:
     return from_dt, to_dt
 
 
-def has_contest_permission(cfg, member: Member) -> bool:
-    # Создавать/завершать конкурсы могут только обладатели роли с правом администратора
-    # (или владельцы из owner_ids). Остальным /contest показывает лишь действующие конкурсы.
-    return has_bypass(cfg, member)
+async def has_contest_permission(bot, user_id: int) -> bool:
+    # Управлять конкурсами могут владельцы (право ``*``), сотрудники (``users.staff``)
+    # и обладатели роли с правом ``activity.contest.manage``. Остальным /contest
+    # показывает лишь действующие конкурсы.
+    return await has_perm(bot, user_id, "activity.contest.manage", staff_bypass=True)

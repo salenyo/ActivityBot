@@ -75,7 +75,7 @@ class ContestCommands(Cog):
         cfg = await self.bot.get_cfg()
         contests = await self.bot.db.activity.get_active_contests(inter.guild_id)
 
-        if has_contest_permission(cfg, inter.author):
+        if await has_contest_permission(self.bot, inter.author.id):
             stats = await self._build_stats(contests)
             await inter.edit_original_message(
                 components=[build_contest_main(stats, cfg.embed_color)]
@@ -130,7 +130,7 @@ class ContestCommands(Cog):
             return
 
         cfg = await self.bot.get_cfg()
-        if not has_contest_permission(cfg, inter.author):
+        if not await has_contest_permission(self.bot, inter.author.id):
             return await inter.response.send_message("Нет доступа.", ephemeral=True)
         accent = cfg.embed_color
 
