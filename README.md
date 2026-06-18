@@ -8,10 +8,11 @@ Discord-бот (микросервис) для трекинга голосово
 
 | Фича | Описание |
 |------|----------|
-| Трекинг войса | Считает время каждого участника в голосовых каналах выбранной категории |
+| Трекинг войса (`voice_tracker`) | Считает время каждого участника в голосовых каналах выбранной категории |
 | `/activity stats` | Показывает лидерборд за активный конкурс или последние 7 дней |
-| `/activity contest <day\|week\|month>` | Запускает конкурс активности на выбранный период (только по ролям) |
+| `/contest <day\|week\|month>` | Запускает конкурс активности на выбранный период (только по ролям) |
 | Авто-финиш | Каждые 30 минут проверяет окончание конкурса и публикует победителя в канал |
+| `/debug-error` | Служебная команда для проверки глобального error handler / DM-логгера |
 | Persist через Redis | Join-timestamps хранятся в Redis (appendonly) — трекинг не прерывается при рестарте бота |
 
 ---
@@ -26,11 +27,15 @@ ActivityBot (микросервис)
     ├── voice_tracker/
     │   └── __init__.py           # on_voice_state_update: join/leave в Redis → сессии в DB
     ├── activity/
-    │   ├── commands.py           # /activity stats, /activity contest, contest_watcher task
+    │   ├── commands.py           # /activity stats
     │   ├── containers.py         # билдеры Container-компонентов
     │   └── utils.py              # medal(), format_duration(), time_left(), has_contest_permission()
-    └── error_logger/             # отправка ошибок в Telegram через Redis
+    ├── contest/                  # /contest: запуск конкурса, contest_watcher task, анонс победителей
+    └── debug/                    # /debug-error: проверка error handler
 ```
+
+> DM-уведомления об ошибках разработчикам — общий ког `hydra_shared.errors.dm_logger`,
+> подключается автоматически через `HydraBot` (отдельного `error_logger` больше нет).
 
 ---
 
@@ -46,7 +51,7 @@ ActivityBot (микросервис)
 
 ## Конкурсы
 
-- Запускает участник с нужной ролью: `/activity contest day|week|month`
+- Запускает участник с нужной ролью: `/contest day|week|month`
 - Предыдущий активный конкурс автоматически деактивируется
 - Каждые 30 минут `_contest_watcher` проверяет `ends_at`, при истечении:
   - Запрашивает топ-5 участников за период конкурса
