@@ -205,9 +205,12 @@ class ContestCommands(Cog):
 
     # ── Публикация с баннером ────────────────────────────────────────────────
 
-    async def _post_with_banner(self, channel, builder, cfg):
-        """Публикует контейнер в канал, добавляя баннер из ассетов, если он задан."""
-        path = getattr(cfg, "activity_contest_banner_path", None)
+    async def _post_with_banner(self, channel, builder, txt):
+        """Публикует контейнер в канал, добавляя баннер из ассетов, если он задан.
+
+        Путь к баннеру берётся из текстов конкурса (contest.banner_path), а не из
+        guild-конфига — это публичный ассет анонса, см. activity-bot.yaml."""
+        path = (txt or {}).get("banner_path")
         if path and os.path.exists(path):
             return await channel.send(
                 components=[builder(BANNER_FILENAME)],
@@ -323,8 +326,10 @@ class ContestCommands(Cog):
         if guild is None:
             return
 
+        txt = (await self.bot.get_texts()).get("contest", {})
+
         def builder(image_filename):
-            return build_contest_ended(contest, entries, cfg.embed_color, image_filename)
+            return build_contest_ended(contest, entries, cfg.embed_color, image_filename, txt)
 
         # В канале конкурса: удаляем старый анонс и публикуем свежее сообщение с итогами.
         channel_id = contest.get("channel_id")
@@ -338,7 +343,7 @@ class ContestCommands(Cog):
                     except Exception:
                         pass
                 try:
-                    await self._post_with_banner(channel, builder, cfg)
+                    await self._post_with_banner(channel, builder, txt)
                     return
                 except Exception as e:
                     log.warning("contest_announce_post_failed", contest_id=contest["id"], error=str(e))
@@ -350,7 +355,7 @@ class ContestCommands(Cog):
         channel = guild.get_channel(results_id)
         if channel is None:
             return log.warning("contest_results_channel_not_found", channel_id=results_id)
-        await self._post_with_banner(channel, builder, cfg)
+        await self._post_with_banner(channel, builder, txt)
 
 
 class ContestCreateModal(Modal):
@@ -453,10 +458,11 @@ class ContestCreateModal(Modal):
             return await send_notify(inter, "Не удалось создать конкурс.", is_error=True)
 
         try:
+            txt = (await self.bot.get_texts()).get("contest", {})
             message = await cog._post_with_banner(
                 inter.channel,
-                lambda img: build_contest_announcement(contest, cfg.embed_color, img),
-                cfg,
+                lambda img: build_contest_announcement(contest, cfg.embed_color, img, txt),
+                txt,
             )
             await self.bot.db.activity.set_contest_message(
                 contest["id"], channel_id=message.channel.id, message_id=message.id
@@ -507,7 +513,8 @@ class ContestSponsorModal(Modal):
 
         # Обновляем опубликованный анонс, чтобы появилась/исчезла кнопка спонсора.
         cfg = await self.bot.get_cfg()
-        path = getattr(cfg, "activity_contest_banner_path", None)
+        txt = (await self.bot.get_texts()).get("contest", {})
+        path = txt.get("banner_path")
         img = BANNER_FILENAME if (path and os.path.exists(path)) else None
         guild = self.bot.get_guild(self.bot.primary_guild_id)
         channel_id = contest.get("channel_id")
@@ -517,7 +524,7 @@ class ContestSponsorModal(Modal):
             if channel is not None:
                 try:
                     await channel.get_partial_message(message_id).edit(
-                        components=[build_contest_announcement(contest, cfg.embed_color, img)]
+                        components=[build_contest_announcement(contest, cfg.embed_color, img, txt)]
                     )
                 except Exception as e:
                     log.warning("contest_sponsor_edit_failed", contest_id=self.contest_id, error=str(e))

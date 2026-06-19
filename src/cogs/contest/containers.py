@@ -61,37 +61,53 @@ def _desc_md(desc: str) -> str:
     return "\n".join(f"### {ln}" if ln.strip() else ln for ln in desc.splitlines())
 
 
-def _sponsor_button(contest: dict) -> Button | None:
+def _sponsor_button(contest: dict, txt: dict | None = None) -> Button | None:
     url = contest.get("sponsor_url")
     if not url:
         return None
-    return Button(label="Спонсор", style=ButtonStyle.link, url=url)
+    label = (txt or {}).get("sponsor_button", "Спонсор")
+    return Button(label=label, style=ButtonStyle.link, url=url)
 
 
-def _winners_line(contest: dict) -> str:
+def _winners_line(contest: dict, txt: dict | None = None) -> str:
+    a = (txt or {}).get("announce", {})
     n = contest.get("winners_count", 1)
     if _is_giveaway(contest):
-        who = "случайный выбор среди выполнивших условие"
-        head = "1 победитель" if n <= 1 else f"{n} победителей"
+        who = a.get("winners_giveaway_who", "случайный выбор среди выполнивших условие")
+        head = (
+            a.get("winners_giveaway_one", "1 победитель") if n <= 1
+            else a.get("winners_giveaway_many", "{n} победителей").format(n=n)
+        )
         return f"{head} · {who}"
-    return "топ-1 по активности" if n <= 1 else f"топ-{n} по активности"
+    return (
+        a.get("winners_leaderboard_one", "топ-1 по активности") if n <= 1
+        else a.get("winners_leaderboard_many", "топ-{n} по активности").format(n=n)
+    )
 
 
-def _fields(contest: dict) -> str:
+def _fields(contest: dict, txt: dict | None = None) -> str:
     """Компактный блок «ключ — значение» для анонса."""
+    a = (txt or {}).get("announce", {})
     prize = contest.get("prize")
-    lines = [f"**Приз** — {prize}" if prize else "**Приз** — разыгрывается среди участников"]
+    if prize:
+        lines = [a.get("prize", "**Приз** — {prize}").format(prize=prize)]
+    else:
+        lines = [a.get("prize_none", "**Приз** — разыгрывается среди участников")]
     secs = contest.get("min_voice_seconds")
     if _is_giveaway(contest) and secs:
-        lines.append(f"**Условие** — {format_duration(secs)} в голосовых")
-    lines.append(f"**Награды** — {_winners_line(contest)}")
+        lines.append(a.get("condition", "**Условие** — {duration} в голосовых").format(
+            duration=format_duration(secs)))
+    lines.append(a.get("awards", "**Награды** — {winners}").format(winners=_winners_line(contest, txt)))
     return "\n".join(lines)
 
 
 # ── публичный анонс ────────────────────────────────────────────────────────────
 
 
-def build_contest_announcement(contest: dict, accent: int, image_filename: str | None = None) -> Container:
+def build_contest_announcement(
+    contest: dict, accent: int, image_filename: str | None = None, txt: dict | None = None
+) -> Container:
+    a = (txt or {}).get("announce", {})
     ts = int(_ends_at(contest).timestamp())
     desc = contest.get("description")
     blocks = [
@@ -103,30 +119,35 @@ def build_contest_announcement(contest: dict, accent: int, image_filename: str |
     if desc:
         blocks.append(TextDisplay(_desc_md(desc)))
         blocks.append(Separator(divider=False))
-    blocks.append(TextDisplay(_fields(contest)))
+    blocks.append(TextDisplay(_fields(contest, txt)))
     blocks.append(Separator(divider=False))
-    blocks.append(TextDisplay("-# Нажмите «Участие», чтобы вступить в конкурс."))
+    blocks.append(TextDisplay(a.get("join_hint", "-# Нажмите «Участие», чтобы вступить в конкурс.")))
     blocks.append(
         ActionRow(
-            Button(label="Участие", style=ButtonStyle.success, custom_id=f"{JOIN_PREFIX}{contest['id']}"),
-            *([b] if (b := _sponsor_button(contest)) else []),
+            Button(label=a.get("join_button", "Участие"), style=ButtonStyle.success,
+                   custom_id=f"{JOIN_PREFIX}{contest['id']}"),
+            *([b] if (b := _sponsor_button(contest, txt)) else []),
         )
     )
     return Container(*blocks, accent_colour=Colour(accent))
 
 
-def build_contest_ended(contest: dict, entries: list[dict], accent: int, image_filename: str | None = None) -> Container:
+def build_contest_ended(
+    contest: dict, entries: list[dict], accent: int,
+    image_filename: str | None = None, txt: dict | None = None,
+) -> Container:
+    r = (txt or {}).get("results", {})
     winners = contest.get("winners_count", 1)
     winner_entries = entries[:winners]
     giveaway = _is_giveaway(contest)
 
     if not winner_entries:
-        head = "Победителей нет — никто не выполнил условие." if giveaway \
-            else "Победителей нет — участники не набрали активности."
+        head = r.get("none_giveaway", "Победителей нет — никто не выполнил условие.") if giveaway \
+            else r.get("none_leaderboard", "Победителей нет — участники не набрали активности.")
     elif len(winner_entries) == 1:
-        head = "Победитель"
+        head = r.get("winner_one", "Победитель")
     else:
-        head = "Победители"
+        head = r.get("winner_many", "Победители")
 
     if giveaway:
         lines = [f"{medal(i + 1)} <@{e['user_id']}>" for i, e in enumerate(winner_entries)]
@@ -139,7 +160,7 @@ def build_contest_ended(contest: dict, entries: list[dict], accent: int, image_f
     prize = contest.get("prize")
     desc = contest.get("description")
     blocks = [
-        TextDisplay(f"## Итоги · {_kind_label(contest)}"),
+        TextDisplay(r.get("title", "## Итоги · {kind}").format(kind=_kind_label(contest))),
         TextDisplay(f"-# {_type_label(contest)}"),
         Separator(),
         *_media(image_filename),
@@ -148,11 +169,11 @@ def build_contest_ended(contest: dict, entries: list[dict], accent: int, image_f
         blocks.append(TextDisplay(_desc_md(desc)))
         blocks.append(Separator(divider=False))
     if prize:
-        blocks.append(TextDisplay(f"**Приз** — {prize}"))
+        blocks.append(TextDisplay(r.get("prize", "**Приз** — {prize}").format(prize=prize)))
     blocks.append(TextDisplay(f"**{head}**" if winner_entries else head))
     if lines:
         blocks.append(TextDisplay("\n".join(lines)))
-    sponsor = _sponsor_button(contest)
+    sponsor = _sponsor_button(contest, txt)
     if sponsor:
         blocks.append(Separator(divider=False))
         blocks.append(ActionRow(sponsor))
