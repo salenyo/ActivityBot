@@ -129,7 +129,7 @@ def parse_contest_dates(contest: dict) -> tuple[datetime, datetime]:
 
 
 async def has_contest_permission(bot, user_id: int) -> bool:
-    # Управлять конкурсами могут владельцы (право ``*``), сотрудники (``users.staff``)
-    # и обладатели роли с правом ``activity.contest.manage``. Остальным /contest
-    # показывает лишь действующие конкурсы.
-    return await has_perm(bot, user_id, "activity.contest.manage", staff_bypass=True)
+    # Управлять конкурсами могут только владельцы (право ``*``) и обладатели роли с правом
+    # ``activity.contest.manage``. Статус стаффа (``users.staff``) доступа НЕ даёт.
+    # Остальным /contest показывает лишь действующие конкурсы.
+    return await has_perm(bot, user_id, "activity.contest.manage")
