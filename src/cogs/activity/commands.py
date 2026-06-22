@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from disnake import ApplicationCommandInteraction, MessageInteraction
+from disnake import ApplicationCommandInteraction, Locale, Localized, MessageInteraction
 from disnake.ext.commands import AutoShardedBot, Cog, slash_command
 
 from hydra_shared.logging import get_logger
@@ -49,7 +49,7 @@ class ActivityCommands(Cog):
     def __init__(self, bot: AutoShardedBot):
         self.bot = bot
 
-    @slash_command(name="activity", description="Активность в голосовых каналах")
+    @slash_command(name=Localized("activity", data={Locale.ru: "активность"}), description="Активность в голосовых каналах")
     async def activity(self, inter: ApplicationCommandInteraction):
         pass
 

@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from disnake import (
     ApplicationCommandInteraction,
     File,
+    Locale,
+    Localized,
     Member,
     MessageInteraction,
     ModalInteraction,
@@ -66,7 +68,7 @@ class ContestCommands(Cog):
 
     # ── /contest ──────────────────────────────────────────────────────────────
 
-    @slash_command(name="contest", description="Конкурсы активности")
+    @slash_command(name=Localized("contest", data={Locale.ru: "конкурс"}), description="Конкурсы активности")
     async def contest(self, inter: ApplicationCommandInteraction):
         if not isinstance(inter.author, Member):
             return await inter.response.send_message("Только на сервере.", ephemeral=True)
