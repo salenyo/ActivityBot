@@ -81,10 +81,18 @@ class ActivityCommands(Cog):
             guild_id=guild_id, user_id=user_id, from_dt=from_dt, to_dt=to_dt,
         )
         user_total = (user_data or {}).get("total_seconds", 0)
+        try:
+            msg_data = await self.bot.db.activity.get_user_message_count(
+                guild_id=guild_id, user_id=user_id, from_dt=from_dt, to_dt=to_dt,
+            )
+            user_messages = int((msg_data or {}).get("count", 0))
+        except Exception:  # noqa: BLE001 — счётчик сообщений не должен ломать стату
+            user_messages = 0
         return build_stats_container(
             entries=entries,
             period=period,
             user_id=user_id,
             user_total=user_total,
+            user_messages=user_messages,
             accent=accent,
         )

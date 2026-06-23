@@ -7,6 +7,7 @@ from src.data import ActivityConfig
 SERVICE_NAME = "activity-bot"
 COGS = [
     "src.cogs.voice_tracker",
+    "src.cogs.message_tracker",
     "src.cogs.activity",
     "src.cogs.contest",
     "src.cogs.debug",

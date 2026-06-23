@@ -44,6 +44,7 @@ def build_stats_container(
     user_id: int,
     user_total: int,
     accent: int,
+    user_messages: int = 0,
 ) -> Container:
     label = PERIOD_LABEL.get(period, "Неделя")
 
@@ -67,6 +68,6 @@ def build_stats_container(
         Separator(),
         TextDisplay(board_text),
         Separator(),
-        TextDisplay(user_line),
+        TextDisplay(f"{user_line}\n-# 💬 Ваши сообщения за период: **{user_messages}**"),
         accent_colour=Colour(accent),
     )
