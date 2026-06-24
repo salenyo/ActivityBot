@@ -17,20 +17,11 @@ log = get_logger(__name__)
 UTC = timezone.utc
 
 _ALL_TIME_START = datetime(2020, 1, 1, tzinfo=UTC)
-# Календарные периоды отсчитываем по Москве (UTC+3, без перехода на летнее время),
-# чтобы «день/неделя/месяц» совпадали с местными сутками, а не с UTC.
 MSK = timezone(timedelta(hours=3))
 
 
 def _period_window(period: str) -> tuple[datetime, datetime]:
-    """Границы ТЕКУЩЕГО календарного периода (а не «последних N дней»).
-
-    day   — с местной полуночи сегодня;
-    week  — с понедельника текущей недели;
-    month — с 1-го числа текущего месяца;
-    all   — с фиксированной отправной точки.
-    Возвращаем границы в UTC, т.к. сессии в БД хранятся в UTC.
-    """
+    """Границы текущего календарного периода (day/week/month/all) в UTC."""
     now = datetime.now(UTC)
     if period == "all":
         return _ALL_TIME_START, now
@@ -40,7 +31,7 @@ def _period_window(period: str) -> tuple[datetime, datetime]:
         start = midnight - timedelta(days=local.weekday())
     elif period == "month":
         start = midnight.replace(day=1)
-    else:  # day и любые неизвестные значения
+    else:
         start = midnight
     return start.astimezone(UTC), now
 

@@ -24,7 +24,6 @@ END_PREFIX = "contest:end:"
 SPONSOR_PREFIX = "contest:sponsor:"
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
 
 
 def _ends_at(contest: dict) -> datetime:
@@ -57,7 +56,7 @@ def _media(image_filename: str | None) -> list:
 
 
 def _desc_md(desc: str) -> str:
-    """Описание заголовком ### — крупнее и контрастнее обычного текста, не сливается с фоном."""
+    """Описание заголовком ### - крупнее и контрастнее обычного текста, не сливается с фоном."""
     return "\n".join(f"### {ln}" if ln.strip() else ln for ln in desc.splitlines())
 
 
@@ -86,7 +85,7 @@ def _winners_line(contest: dict, txt: dict | None = None) -> str:
 
 
 def _fields(contest: dict, txt: dict | None = None) -> str:
-    """Компактный блок «ключ — значение» для анонса."""
+    """Компактный блок "ключ - значение" для анонса."""
     a = (txt or {}).get("announce", {})
     prize = contest.get("prize")
     if prize:
@@ -101,7 +100,6 @@ def _fields(contest: dict, txt: dict | None = None) -> str:
     return "\n".join(lines)
 
 
-# ── публичный анонс ────────────────────────────────────────────────────────────
 
 
 def build_contest_announcement(
@@ -180,7 +178,6 @@ def build_contest_ended(
     return Container(*blocks, accent_colour=Colour(accent))
 
 
-# ── эфемерные вью (обзор / конструктор) ────────────────────────────────────────
 
 
 def _stat_block(stat: dict) -> str:

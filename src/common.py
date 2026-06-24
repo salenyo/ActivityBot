@@ -71,7 +71,6 @@ def time_left(ends_at: datetime) -> str:
 
 def _unit_seconds(unit: str) -> int | None:
     u = unit.lower()
-    # Порядок важен: «мес»/«нед» проверяем до «м» (минут), иначе перехватит минутами.
     if u in {"w", "week", "weeks"} or u.startswith("нед"):
         return 7 * 86400
     if u in {"mo", "mon", "month", "months"} or u.startswith("мес"):
@@ -86,11 +85,7 @@ def _unit_seconds(unit: str) -> int | None:
 
 
 def parse_duration(text: str) -> timedelta | None:
-    """Парсит произвольную длительность вида «2д 3ч», «1 день 12 часов», «90 мин».
-
-    Возвращает None, если ничего не распознано или результат вне диапазона
-    (1 минута … MAX_CONTEST_SECONDS).
-    """
+    """Парсит длительность вида "2д 3ч", "90 мин"; None, если не распознано или вне диапазона."""
     total = 0
     matched = False
     for num, unit in re.findall(r"(\d+)\s*([a-zA-Zа-яА-Я]+)", text):
@@ -129,7 +124,4 @@ def parse_contest_dates(contest: dict) -> tuple[datetime, datetime]:
 
 
 async def has_contest_permission(bot, user_id: int) -> bool:
-    # Управлять конкурсами могут только владельцы (право ``*``) и обладатели роли с правом
-    # ``activity.contest.manage``. Статус стаффа (``users.staff``) доступа НЕ даёт.
-    # Остальным /contest показывает лишь действующие конкурсы.
     return await has_perm(bot, user_id, "activity.contest.manage")

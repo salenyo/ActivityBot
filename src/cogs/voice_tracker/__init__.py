@@ -11,8 +11,6 @@ log = get_logger(__name__)
 
 UTC = timezone.utc
 MIN_SESSION_SECONDS = 30
-# Верхняя граница вменяемой сессии. Всё, что длиннее, — почти наверняка пропущенный
-# leave (даунтайм/реконнект): joined_at устарел, и длительность раздута. Такое не пишем.
 MAX_SESSION_SECONDS = 24 * 3600
 _KEY = "activity:voice:{user_id}"
 
@@ -33,7 +31,6 @@ class VoiceTracker(Cog):
 
     @staticmethod
     def _key_user_id(key: str) -> int | None:
-        # redis-клиент с decode_responses=True отдаёт ключи строками.
         try:
             return int(key.rsplit(":", 1)[-1])
         except (ValueError, IndexError):
@@ -50,10 +47,6 @@ class VoiceTracker(Cog):
         return True
 
     async def _handle_join(self, member: Member, channel) -> None:
-        # Событие join означает, что человек реально только что зашёл, поэтому время
-        # старта ставим текущее БЕЗУСЛОВНО. Если в Redis висел протухший ключ (его leave
-        # был пропущен из-за даунтайма), он перезаписывается — без этого следующая сессия
-        # считалась бы от старого joined_at и давала бы фейковые многочасовые записи.
         ts = str(int(datetime.now(UTC).timestamp()))
         await self.bot.redis.set(self._redis_key(member.id), ts)
         log.debug("voice_join_tracked", user_id=member.id, channel_id=channel.id)
@@ -123,9 +116,6 @@ class VoiceTracker(Cog):
                     if not await self.bot.redis.exists(key):
                         await self.bot.redis.set(key, now_ts)
 
-        # Реконсиляция: удаляем ключи тех, кого сейчас НЕТ в отслеживаемых войсах. Их leave
-        # был пропущен (бот лежал/реконнект), а иначе старый joined_at пережил бы рестарт и
-        # раздул бы следующую сессию. Сканируем только свой префикс — Redis общий на сервисы.
         removed = 0
         async for key in self.bot.redis.scan_iter(match=_KEY.format(user_id="*")):
             uid = self._key_user_id(key)

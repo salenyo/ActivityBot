@@ -54,7 +54,6 @@ from .containers import (
 log = get_logger(__name__)
 UTC = timezone.utc
 BANNER_FILENAME = "contest.png"
-# Ключ Redis с таймстемпом захода в войс — совпадает с VoiceTracker (cogs/voice_tracker).
 VOICE_KEY = "activity:voice:{user_id}"
 
 
@@ -66,7 +65,6 @@ class ContestCommands(Cog):
     def cog_unload(self):
         self._contest_watcher.cancel()
 
-    # ── /contest ──────────────────────────────────────────────────────────────
 
     @slash_command(name=Localized("contest", data={Locale.ru: "конкурс"}), description="Конкурсы активности")
     async def contest(self, inter: ApplicationCommandInteraction):
@@ -121,7 +119,6 @@ class ContestCommands(Cog):
             stats.append(stat)
         return stats
 
-    # ── Конструктор (кнопки) ─────────────────────────────────────────────────
 
     @Cog.listener("on_button_click")
     async def on_contest_button(self, inter: MessageInteraction):
@@ -171,7 +168,6 @@ class ContestCommands(Cog):
                 return
             await inter.response.send_modal(ContestSponsorModal(self.bot, contest_id, accent))
 
-    # ── Кнопка участия ─────────────────────────────────────────────────────────
 
     @Cog.listener("on_button_click")
     async def on_join_button(self, inter: MessageInteraction):
@@ -205,13 +201,9 @@ class ContestCommands(Cog):
                 inter, "Вы в списке участников конкурса! Набирайте активность в голосовых."
             )
 
-    # ── Публикация с баннером ────────────────────────────────────────────────
 
     async def _post_with_banner(self, channel, builder, txt):
-        """Публикует контейнер в канал, добавляя баннер из ассетов, если он задан.
-
-        Путь к баннеру берётся из текстов конкурса (contest.banner_path), а не из
-        guild-конфига — это публичный ассет анонса, см. activity-bot.yaml."""
+        """Публикует контейнер в канал, добавляя баннер из ассетов (contest.banner_path), если задан."""
         path = (txt or {}).get("banner_path")
         if path and os.path.exists(path):
             return await channel.send(
@@ -220,7 +212,6 @@ class ContestCommands(Cog):
             )
         return await channel.send(components=[builder(None)])
 
-    # ── Автозавершение и проверка условий ──────────────────────────────────────
 
     @tasks.loop(minutes=5)
     async def _contest_watcher(self):
@@ -250,11 +241,7 @@ class ContestCommands(Cog):
         await self.bot.wait_until_ready()
 
     async def _live_sessions(self, contest: dict) -> dict[int, int]:
-        """Открытые (ещё не закрытые) голосовые сессии участников: user_id -> unix-таймстемп.
-
-        Берём из Redis (тот же ключ, что у VoiceTracker). Самой сессии в voice_sessions ещё
-        нет — она появится после выхода из войса. Окно зачёта считает уже DB-API.
-        """
+        """Открытые голосовые сессии участников из Redis (user_id -> заход), которых ещё нет в voice_sessions."""
         participants = await self.bot.db.activity.get_participants(contest["id"])
         live: dict[int, int] = {}
         for user_id in participants:
@@ -287,12 +274,9 @@ class ContestCommands(Cog):
                 log.info("contest_qualify_dm_failed", contest_id=contest["id"], user_id=user_id)
 
     async def _finish_contest(self, contest: dict, cfg) -> None:
-        # Объявление в отдельном try: даже если публикация упадёт, конкурс всё равно
-        # должен завершиться — иначе он навсегда останется активным.
         try:
             winners = contest.get("winners_count", 1)
             if contest.get("kind") == "giveaway":
-                # Финальная сверка: сервер сам обрежет окно по концу конкурса (now >= ends_at).
                 live = await self._live_sessions(contest)
                 await self.bot.db.activity.recompute_qualified(contest["id"], live_sessions=live)
                 qualified = await self.bot.db.activity.get_qualified_participants(contest["id"])
@@ -333,7 +317,6 @@ class ContestCommands(Cog):
         def builder(image_filename):
             return build_contest_ended(contest, entries, cfg.embed_color, image_filename, txt)
 
-        # В канале конкурса: удаляем старый анонс и публикуем свежее сообщение с итогами.
         channel_id = contest.get("channel_id")
         message_id = contest.get("message_id")
         if channel_id:
@@ -350,7 +333,6 @@ class ContestCommands(Cog):
                 except Exception as e:
                     log.warning("contest_announce_post_failed", contest_id=contest["id"], error=str(e))
 
-        # Фолбэк — канал результатов из конфига.
         results_id = cfg.activity_results_channel_id
         if results_id is None:
             return log.warning("contest_results_channel_unset", contest_id=contest["id"])
@@ -513,7 +495,6 @@ class ContestSponsorModal(Modal):
             log.error("contest_sponsor_set_failed", contest_id=self.contest_id, error=str(e))
             return await send_notify(inter, "Не удалось сохранить спонсора.", is_error=True)
 
-        # Обновляем опубликованный анонс, чтобы появилась/исчезла кнопка спонсора.
         cfg = await self.bot.get_cfg()
         txt = (await self.bot.get_texts()).get("contest", {})
         path = txt.get("banner_path")
