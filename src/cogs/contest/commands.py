@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import os
 import random
 from datetime import datetime, timezone
 
 from disnake import (
     ApplicationCommandInteraction,
-    File,
     Locale,
     Localized,
     Member,
@@ -19,7 +17,7 @@ from disnake.ext.commands import AutoShardedBot, Cog, slash_command
 from disnake.ui import Modal, TextInput
 
 from hydra_shared.logging import get_logger
-from hydra_shared.ui import send_notify
+from hydra_shared.ui import media_ref, resolve_media, send_notify
 
 from src.common import (
     CONTEST_DURATIONS,
@@ -203,14 +201,11 @@ class ContestCommands(Cog):
 
 
     async def _post_with_banner(self, channel, builder, txt):
-        """Публикует контейнер в канал, добавляя баннер из ассетов (contest.banner_path), если задан."""
-        path = (txt or {}).get("banner_path")
-        if path and os.path.exists(path):
-            return await channel.send(
-                components=[builder(BANNER_FILENAME)],
-                file=File(path, filename=BANNER_FILENAME),
-            )
-        return await channel.send(components=[builder(None)])
+        """Публикует контейнер в канал с баннером contest.banner_path (URL или локальный файл), если задан."""
+        url, file = resolve_media((txt or {}).get("banner_path"), filename=BANNER_FILENAME)
+        if file is not None:
+            return await channel.send(components=[builder(url)], file=file)
+        return await channel.send(components=[builder(url)])
 
 
     @tasks.loop(minutes=5)
@@ -497,8 +492,7 @@ class ContestSponsorModal(Modal):
 
         cfg = await self.bot.get_cfg()
         txt = (await self.bot.get_texts()).get("contest", {})
-        path = txt.get("banner_path")
-        img = BANNER_FILENAME if (path and os.path.exists(path)) else None
+        img = media_ref(txt.get("banner_path"), filename=BANNER_FILENAME)
         guild = self.bot.get_guild(self.bot.primary_guild_id)
         channel_id = contest.get("channel_id")
         message_id = contest.get("message_id")

@@ -49,10 +49,11 @@ def _type_label(contest: dict) -> str:
     return CONTEST_TYPE_LABEL.get(contest["contest_type"], contest["contest_type"])
 
 
-def _media(image_filename: str | None) -> list:
-    if not image_filename:
+def _media(image_media: str | None) -> list:
+    """image_media — готовая строка media (URL или attachment://имя) из hydra_shared.ui.media_ref."""
+    if not image_media:
         return []
-    return [MediaGallery(MediaGalleryItem(media=f"attachment://{image_filename}"))]
+    return [MediaGallery(MediaGalleryItem(media=image_media))]
 
 
 def _desc_md(desc: str) -> str:
@@ -103,7 +104,7 @@ def _fields(contest: dict, txt: dict | None = None) -> str:
 
 
 def build_contest_announcement(
-    contest: dict, accent: int, image_filename: str | None = None, txt: dict | None = None
+    contest: dict, accent: int, image_media: str | None = None, txt: dict | None = None
 ) -> Container:
     a = (txt or {}).get("announce", {})
     ts = int(_ends_at(contest).timestamp())
@@ -112,7 +113,7 @@ def build_contest_announcement(
         TextDisplay(f"## {_kind_label(contest)}"),
         TextDisplay(f"-# {_type_label(contest)}  ·  завершение <t:{ts}:R>"),
         Separator(),
-        *_media(image_filename),
+        *_media(image_media),
     ]
     if desc:
         blocks.append(TextDisplay(_desc_md(desc)))
@@ -132,7 +133,7 @@ def build_contest_announcement(
 
 def build_contest_ended(
     contest: dict, entries: list[dict], accent: int,
-    image_filename: str | None = None, txt: dict | None = None,
+    image_media: str | None = None, txt: dict | None = None,
 ) -> Container:
     r = (txt or {}).get("results", {})
     winners = contest.get("winners_count", 1)
@@ -161,7 +162,7 @@ def build_contest_ended(
         TextDisplay(r.get("title", "## Итоги · {kind}").format(kind=_kind_label(contest))),
         TextDisplay(f"-# {_type_label(contest)}"),
         Separator(),
-        *_media(image_filename),
+        *_media(image_media),
     ]
     if desc:
         blocks.append(TextDisplay(_desc_md(desc)))
